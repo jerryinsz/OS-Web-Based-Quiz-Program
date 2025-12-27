@@ -1,3 +1,3 @@
 # OS-Web-Based-Quiz-Program
 
-***.docx+.html=Quiz
+**.docx+.html=Quiz**
