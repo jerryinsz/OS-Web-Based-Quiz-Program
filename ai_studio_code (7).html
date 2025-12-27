@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>操作系统习题练习</title>
+    <style>
+        :root { --primary: #0f766e; --correct: #34d399; --wrong: #f87171; --bg: #f0fdfa; }
+        body { font-family: 'Segoe UI', "Microsoft YaHei", sans-serif; background: var(--bg); margin: 0; padding: 20px; height: 100vh; display: flex; justify-content: center; box-sizing: border-box; }
+        
+        .app-wrapper { width: 100%; max-width: 800px; display: flex; flex-direction: column; background: white; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); overflow: hidden; height: 100%; }
+        
+        /* 顶部栏 */
+        .header { padding: 20px; background: white; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+        .title-box h2 { margin: 0; font-size: 1.2rem; color: #111827; }
+        .progress-badge { background: #ccfbf1; color: #0f766e; padding: 5px 12px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; }
+
+        /* 内容区 */
+        .content-area { flex: 1; overflow-y: auto; padding: 30px; display: none; flex-direction: column; }
+        .q-stem { font-size: 1.25rem; font-weight: 600; color: #1f2937; line-height: 1.6; margin-bottom: 25px; white-space: pre-wrap; }
+        
+        /* 选项列表 */
+        .options-list { display: flex; flex-direction: column; gap: 12px; }
+        .option-card { 
+            padding: 16px 20px; border: 2px solid #e5e7eb; border-radius: 10px; cursor: pointer; 
+            transition: all 0.2s; display: flex; align-items: flex-start; gap: 10px; font-size: 1.05rem; color: #374151;
+        }
+        .option-card:hover { border-color: #99f6e4; background: #f0fdfa; }
+        .option-label { font-weight: 800; min-width: 25px; }
+
+        /* 状态样式 */
+        .option-card.correct { background: #ecfdf5; border-color: var(--correct); color: #064e3b; }
+        .option-card.wrong { background: #fef2f2; border-color: var(--wrong); color: #7f1d1d; }
+        .option-card.disabled { pointer-events: none; opacity: 0.8; }
+
+        /* 底部导航 */
+        .footer { padding: 20px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 15px; background: white; }
+        .btn { padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; font-size: 1rem; transition: 0.2s; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-outline { background: transparent; border: 2px solid var(--primary); color: var(--primary); }
+
+        /* 导入模态框 */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
+        .modal-box { background: white; width: 90%; max-width: 700px; padding: 30px; border-radius: 16px; display: flex; flex-direction: column; gap: 20px; max-height: 90vh; }
+        textarea { width: 100%; height: 300px; padding: 15px; border: 1px solid #cbd5e1; border-radius: 8px; font-family: monospace; resize: vertical; line-height: 1.5; }
+        .tips { background: #f3f4f6; padding: 12px; border-radius: 8px; font-size: 0.9rem; color: #4b5563; }
+        
+        /* 答案横排识别增强提示 */
+        .highlight { color: #d946ef; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="app-wrapper">
+    <div class="header">
+        <div class="title-box">
+            <h2>操作系统习题练习</h2>
+        </div>
+        <div class="progress-badge" id="progress">准备就绪</div>
+    </div>
+
+    <div class="content-area" id="quiz-view">
+        <div class="q-stem" id="q-text"></div>
+        <div class="options-list" id="opt-container"></div>
+        <div id="feedback" style="margin-top:20px; font-weight:bold; min-height: 24px;"></div>
+    </div>
+
+    <div class="footer">
+        <button class="btn btn-outline" onclick="showImport()">导入题库</button>
+        <div style="display:flex; gap:10px;">
+            <button class="btn btn-primary" id="prev-btn" onclick="nav(-1)">上一题</button>
+            <button class="btn btn-primary" id="next-btn" onclick="nav(1)">下一题</button>
+        </div>
+    </div>
+</div>
+
+<!-- 导入层 -->
+<div id="import-modal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 style="margin:0">📄 导入习题</h3>
+        <div class="tips">
+            1. 请将 <b>题目</b> 和底部的 <b>参考答案</b> 全部复制进来。<br>
+            2. 程序会自动识别横排的答案（如 1. D 2. D ...）。<br>
+            3. 程序会自动拆分挤在一行的选项（如 A... B...）。
+        </div>
+        <textarea id="raw-input" placeholder="请直接粘贴内容，例如：
+1. 题目内容...
+A. 选项A B. 选项B
+...
+参考答案
+1. D 2. D 3. C"></textarea>
+        <button class="btn btn-primary" onclick="parseAndStart()">开始练习</button>
+    </div>
+</div>
+
+<script>
+    let questions = [];
+    let currentIdx = 0;
+
+    function showImport() { document.getElementById('import-modal').style.display = 'flex'; }
+
+    // --- 核心解析引擎 V4.0 ---
+    function parseAndStart() {
+        const raw = document.getElementById('raw-input').value;
+        if (!raw.trim()) return;
+
+        // 1. 分离题目区域和答案区域
+        // 通常答案在最后，以“参考答案”或“答案”开头
+        let contentPart = raw;
+        let answerPart = "";
+        
+        const answerSplitKeys = ["参考答案", "答案：", "答案:"];
+        for (let key of answerSplitKeys) {
+            if (raw.includes(key)) {
+                const parts = raw.split(key);
+                contentPart = parts[0]; // 前半部分是题目
+                answerPart = parts.slice(1).join(key); // 后半部分是答案
+                break;
+            }
+        }
+
+        // 2. 解析答案（支持横排：1. D 2. D）
+        const answerMap = {};
+        // 正则：匹配 "数字" + "间隔" + "A-E"
+        // 使用 global flag 匹配所有出现的情况
+        const ansRegex = /(\d+)\s*[\.:．]?\s*([A-E])/gi;
+        let ansMatch;
+        while ((ansMatch = ansRegex.exec(answerPart)) !== null) {
+            answerMap[ansMatch[1]] = ansMatch[2].toUpperCase();
+        }
+
+        // 3. 预处理题目文本：解决选项在同一行的问题
+        // 策略：在所有 "A." "B." 前面强制加换行符，除非它已经是行首
+        // 注意：匹配 A. A、 A． (全角点)
+        let formattedContent = contentPart.replace(/(\s)([A-E][\.:．、])/g, '\n$2');
+
+        // 4. 解析题目
+        const lines = formattedContent.split('\n');
+        questions = [];
+        let currentQ = null;
+        
+        // 题目开始正则：数字 + 点/顿号
+        const qStartRegex = /^\s*(\d+)[\.:．、]\s*(.*)/;
+        // 选项开始正则
+        const optRegex = /^\s*([A-E])[\.:．、]\s*(.*)/i;
+
+        lines.forEach(line => {
+            line = line.trim();
+            if (!line) return;
+
+            // 检查是否是题目开始
+            let qMatch = line.match(qStartRegex);
+            if (qMatch) {
+                // 如果当前行虽然以数字开头，但看起来像是一个选项内容（例如 "1. 进程..."），这里有歧义
+                // 但通常 "1." 在行首优先判定为题号
+                
+                // 排除误判：如果这一行被判定为题目，但它是 A. 1. xxx 这种情况（已经被上面的replace处理过了，应该在行首）
+                // 排除误判：如果这一行是 "1. D" 这种纯答案行（有时候用户把答案也贴在题目区）
+                if (line.match(/^\d+[\.:．、]\s*[A-E]$/i)) return; 
+
+                if (currentQ) questions.push(currentQ);
+                
+                let id = qMatch[1];
+                currentQ = {
+                    id: id,
+                    title: qMatch[2],
+                    options: [],
+                    answer: answerMap[id] || null, // 自动关联答案
+                    userAns: null
+                };
+                return;
+            }
+
+            // 检查是否是选项
+            let optMatch = line.match(optRegex);
+            if (currentQ && optMatch) {
+                currentQ.options.push({
+                    label: optMatch[1].toUpperCase(),
+                    text: optMatch[2]
+                });
+                return;
+            }
+
+            // 既不是新题也不是选项，追加到当前题目的描述中
+            if (currentQ && !optMatch) {
+                // 简单的防抖：不要把页眉页脚加进去
+                if (line.length > 3) currentQ.title += "\n" + line;
+            }
+        });
+
+        if (currentQ) questions.push(currentQ);
+
+        if (questions.length === 0) {
+            alert("未能识别到题目。请确保题目以 '1.' 开头，并包含 '参考答案' 区域。");
+            return;
+        }
+
+        // 启动界面
+        document.getElementById('import-modal').style.display = 'none';
+        document.getElementById('quiz-view').style.display = 'flex';
+        currentIdx = 0;
+        loadQuestion();
+    }
+
+    // --- 渲染与交互 ---
+    function loadQuestion() {
+        const q = questions[currentIdx];
+        
+        // 更新进度
+        document.getElementById('progress').innerText = `题目 ${currentIdx + 1} / ${questions.length}`;
+        
+        // 显示题目
+        document.getElementById('q-text').innerText = `${q.id}. ${q.title}`;
+        
+        // 显示选项
+        const container = document.getElementById('opt-container');
+        container.innerHTML = '';
+        document.getElementById('feedback').innerText = '';
+
+        q.options.forEach(opt => {
+            const div = document.createElement('div');
+            div.className = 'option-card';
+            div.innerHTML = `<span class="option-label">${opt.label}.</span> <span>${opt.text}</span>`;
+            div.onclick = () => checkAnswer(opt.label, q);
+
+            // 回显状态
+            if (q.userAns) {
+                div.classList.add('disabled');
+                if (q.answer) {
+                    if (opt.label === q.answer) div.classList.add('correct');
+                    if (opt.label === q.userAns && opt.label !== q.answer) div.classList.add('wrong');
+                } else {
+                    // 没有录入答案时，只高亮用户选的
+                    if (opt.label === q.userAns) div.style.background = "#e5e7eb";
+                }
+            }
+            container.appendChild(div);
+        });
+
+        // 答案提示（如果没有解析到答案）
+        if (q.userAns && !q.answer) {
+             document.getElementById('feedback').innerHTML = `<span style="color:#d97706">⚠️ 系统未检测到本题答案，请核对原文。</span>`;
+        }
+
+        // 按钮状态
+        document.getElementById('prev-btn').disabled = currentIdx === 0;
+        document.getElementById('next-btn').innerText = currentIdx === questions.length - 1 ? "完成" : "下一题";
+    }
+
+    function checkAnswer(sel, q) {
+        if (q.userAns) return;
+        q.userAns = sel;
+        loadQuestion(); // 刷新样式
+
+        const fb = document.getElementById('feedback');
+        if (q.answer) {
+            if (sel === q.answer) {
+                fb.innerHTML = `<span style="color:var(--correct)">🎉 回答正确！</span>`;
+            } else {
+                fb.innerHTML = `<span style="color:var(--wrong)">💥 错误，正确答案是 ${q.answer}</span>`;
+            }
+        }
+    }
+
+    function nav(step) {
+        const next = currentIdx + step;
+        if (next >= 0 && next < questions.length) {
+            currentIdx = next;
+            loadQuestion();
+        }
+    }
+</script>
+</body>
+</html>
